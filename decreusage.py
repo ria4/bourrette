@@ -7,11 +7,11 @@ def decreusage(img,
                drawable,
                noise_seed=0,
                noise_detail=1,
-               noise_size=9,
+               noise_size=6,
                noise_smoothness=False,
-               noise_threshold=15,
+               noise_threshold=30,
                hue_shift=0,
-               chroma_shift=30):
+               chroma_shift=60):
 
     pdb.gimp_image_undo_group_start(img)
 
@@ -91,11 +91,11 @@ register(
  [
   (PF_INT32, "noise_seed", "Noise Seed", 0),
   (PF_SPINNER, "noise_detail", "Noise Detail", 1, (0, 5, 1)),
-  (PF_SLIDER, "noise_size", "Noise Size", 9, (1, 10, 1)),
+  (PF_SLIDER, "noise_size", "Noise Size", 6, (1, 10, 1)),
   (PF_BOOL, "noise_smoothness", "Noise Smoothness", False),
-  (PF_SLIDER, "noise_threshold", "Noise Threshold", 15, (0, 100, 1)),
+  (PF_SLIDER, "noise_threshold", "Noise Threshold", 30, (0, 100, 1)),
   (PF_SLIDER, "hue_shift", "Hue Adjustment", 0, (-180, 180, 1)),
-  (PF_SLIDER, "chroma_shift", "Chroma Adjustment", 30, (-180, 180, 1)),
+  (PF_SLIDER, "chroma_shift", "Chroma Adjustment", 60, (-180, 180, 1)),
  ],
  [],
  decreusage)
