@@ -4,6 +4,14 @@ import random
 from gimpfu import *
 
 
+# Constants for exponential input conversion
+L_A = -0.000344125449991
+L_B = 0.11153346297
+L_C = -7.0189446165
+W_A = 3.27285167629e-05
+W_B = 0.0594682389829
+W_C = -6.96725624648
+
 def new_fiber_channels(img, fparams):
     """
     Return an array of correlated fiber channels.
@@ -29,8 +37,16 @@ def new_fiber_channels(img, fparams):
     y_shift = r - l*sin_t - w_in*sin_t*cos_t
 
     # Create base grid
-    # Insert Intelligent Stuff Here
-
+    grid = []
+    n_lines = int(h_grid / d)
+    n_columns = int(w_grid / l)
+    grid_line_origins = [i * l / n_lines for i in range(n_lines)]
+    random.shuffle(grid_line_origins)
+    for i in range(n_lines):
+        grid_line = []
+        for j in range(n_columns):
+            grid_line.append(grid_line_origins[i] + j*l)
+            grid.append(grid_line)
 
     # Set background and foreground colors
     gimp.set_background("black")
@@ -72,20 +88,25 @@ def new_fiber_channels(img, fparams):
 
 def peignage(img,
              drawable,
-             fibers_width=15,
-             fibers_hardness=8,
-             fibers_density=5,
-             fibers_length=5,
-             fibers_orientation=0,
-             fibers_variation=0,
+             f_length=50,
+             f_width=50,
+             f_orientation=0,
+             f_variation=0,
+             f_density=5,
+             f_hardness=8,
              overlap_gain=0):
 
-    fparams = { "width": fibers_width,           # brush size
-                "hardness": fibers_hardness,     # brush hardness
-                "density": fibers_density,
-                "length": fibers_length,
-                "orientation": fibers_orientation,
-                "variation": fibers_variation }
+    # Scale user input exponentially
+    f_width_exp = img.height * math.exp(W_A*f_width**2 + W_B*f_width + W_C)
+    f_length_exp = img.width * math.exp(L_A*f_length**2 + L_B*f_length + L_C)
+
+    # Store all fiber parameters
+    fparams = { "length": f_length_exp,
+                "width": f_width_exp,
+                "orientation": f_orientation,
+                "variation": f_variation,
+                "density": f_density,
+                "hardness": f_hardness }
 
     #pdb.gimp_image_undo_group_start(img)
 
@@ -148,12 +169,12 @@ register(
  "<Image>/Filters/Peignage",
  "RGB*",
  [
-  (PF_SLIDER, "fibers_width", "Fibers Width", 15, (1, 1000, 1)),
-  (PF_SLIDER, "fibers_hardness", "Fibers Hardness", 8, (0, 10, 1)),
-  (PF_SLIDER, "fibers_density", "Fibers Density", 5, (1, 10, 1)),
-  (PF_SLIDER, "fibers_length", "Fibers Length", 5, (1, 10, 1)),
-  (PF_SLIDER, "fibers_orientation", "Fibers Orientation", 0, (-90, 90, 1)),
-  (PF_SLIDER, "fibers_variation", "Fibers Variation", 0, (0, 10, 1)),
+  (PF_SLIDER, "f_length", "Fibers Length", 50, (1, 100, 1)),
+  (PF_SLIDER, "f_width", "Fibers Width", 50, (1, 100, 1)),
+  (PF_SLIDER, "f_orientation", "Fibers Orientation", 0, (-90, 90, 1)),
+  (PF_SLIDER, "f_variation", "Fibers Variation", 0, (0, 10, 1)),
+  (PF_SLIDER, "f_density", "Fibers Density", 5, (1, 10, 1)),
+  (PF_SLIDER, "f_hardness", "Fibers Hardness", 8, (0, 10, 1)),
   (PF_SLIDER, "overlap_gain", "Overlap Gain", 0, (0, 10, 1)),
  ],
  [],
