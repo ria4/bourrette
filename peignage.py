@@ -12,42 +12,69 @@ W_A = 3.27285167629e-05
 W_B = 0.0594682389829
 W_C = -6.96725624648
 
+
+class Grid:
+    def __init__(self, img, fparams):
+        # Imported constants
+        self.w_img = img.width
+        self.h_img = img.height
+        self.l = fparams["length"]
+        self.d = fparams["width"]
+        self.r = fparams["width"] / 2.0
+        # Internal frame
+        self.w_in = self.w_img - 2*r
+        self.h_in = self.h_img - 2*r
+        # Precomputed trigonometrics
+        self.cos_t = math.cos(math.radians(fparams["orientation"]))
+        self.sin_t = math.sin(math.radians(fparams["orientation"]))
+        # Dimensions
+        self.w = self.h_in*self.sin_t + self.w_in*self.cos_t + self.l
+        self.h = self.h_in*self.cos_t + self.w_in*self.sin_t
+        # Cells
+        self.n_lines = int(self.h / self.d) + 2
+        self.grid_x_0 = [i * self.l / self.n_lines for i in range(self.n_lines)]
+        self.n_columns = int(self.w / self.l)
+        # Translation
+        self.tx = self.r - self.l*self.cos_t + self.w_in*self.sin_t*self.sin_t
+        self.ty = self.r - self.l*self.sin_t - self.w_in*self.sin_t*self.cos_t
+
+        self.reset()
+
+    def reset(self):
+        self.coordinates = []
+        grid_y_0 = -self.d * random.random()
+        random.shuffle(self.grid_x_0)
+        for i in range(self.n_lines):
+            line_abscissae = []
+            for j in range(self.n_columns):
+                line_abscissae.append(self.grid_x_0[i] + j*self.l)
+            self.coordinates.append([line_abscissae, grid_y_0 + i*self.d])
+
+    def rotate_translate(self):
+        coordinates = []
+        for i in range(self.n_lines):
+            y_old = self.coordinates[i][1]
+            line_abscissae = []
+            for j in range(self.n_columns):
+                x_old = self.coordinates[i][0][j]
+                x_new = x_old*self.cos_t - y_old*self.sin_t + self.tx
+                grid_line_abscissae.append(x_new)
+            y_new = x_old*self.sin_t + y_old*self.cos_t + self.ty
+            coordinates.append([grid_line_abscissae, y_new])
+        self.coordinates = coordinates
+
+    # def creer points couples
+    # tester
+    # def projeter points aux frontières
+    # def filtrer segments trop courts
+    # def decimer
+
+
 def new_fiber_channels(img, fparams):
     """
     Return an array of correlated fiber channels.
     The length of the array equals the number of layers in img.
     """
-    # Define constants
-    w = img.width
-    h = img.height
-    l = fparams["length"]
-    d = fparams["width"]
-    r = fparams["width"] / 2.0
-    # Internal frame
-    w_in = img.width - 2*r
-    h_in = img.height - 2*r
-    # Trigonometric shortcuts
-    cos_t = math.cos(math.radians(fparams["orientation"]))
-    sin_t = math.sin(math.radians(fparams["orientation"]))
-    # Grid size
-    w_grid = h_in*sin_t + w_in*cos_t + l
-    h_grid = h_in*cos_t + w_in*sin_t
-    # Grid translation
-    x_shift = r - l*cos_t + w_in*sin_t*sin_t
-    y_shift = r - l*sin_t - w_in*sin_t*cos_t
-
-    # Create base grid
-    grid = []
-    n_lines = int(h_grid / d)
-    n_columns = int(w_grid / l)
-    grid_line_origins = [i * l / n_lines for i in range(n_lines)]
-    random.shuffle(grid_line_origins)
-    for i in range(n_lines):
-        grid_line = []
-        for j in range(n_columns):
-            grid_line.append(grid_line_origins[i] + j*l)
-            grid.append(grid_line)
-
     # Set background and foreground colors
     gimp.set_background("black")
     gimp.set_foreground("white")
@@ -70,7 +97,6 @@ def new_fiber_channels(img, fparams):
     # Insert Intelligent Stuff Here
     #pdb.gimp_paintbrush_default(flayers[rand], 4, [Ax, Ay, Bx, By])
     #pdb.gimp_paintbrush_default(flayers[0], 4, [100, 100, 300, 500])
-
 
     # Create channels based on brightness levels
     # White noise means full effect, black noise means no effect
