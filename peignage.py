@@ -28,10 +28,14 @@ class Point:
         self.x += tx
         self.y += ty
 
+    def copy(self):
+        return Point(self.x, self.y)
+
 class Fiber:
-    def __init__(self, pt_m, pt_n):
-        self.m = pt_m
-        self.n = pt_n
+    def __init__(self, point, l, cos_t, sin_t, variation):
+        self.m = point
+        self.n = point.copy()
+        self.n.translate(l/2.0*cos_t, l/2.0*sin_t) #XXX
 
     def rotate(self, cos_t, sin_t):
         self.m.rotate(cos_t, sin_t)
@@ -97,10 +101,13 @@ class Grid:
             fiber.translate(self.tx, self.ty)
 
     def points_to_fibers(self):
-        pass
+        self.fibers = []
+        for point in self.points:
+            f = Fiber(point, self.l, self.cos_t, self.sin_t,
+                      self.params["variation"])
+            self.fibers.append(f)
 
-    # tester
-    # def projeter points aux frontières
+    # def projeter points aux frontieres
     # def filtrer segments trop courts
     # def decimer
 
@@ -129,7 +136,13 @@ def new_fiber_channels(img, fparams):
     pdb.gimp_context_set_brush_hardness(fparams["hardness"] / 10.0)
 
     # Paint over multiple layers
-    # Insert Intelligent Stuff Here
+    g = Grid(img, fparams)
+    g.points_to_fibers()
+
+    for fiber in g.fibers:
+        layer = random.choice(flayers)
+        pdb.gimp_paintbrush_default(layer, 4, [fiber.m.x, fiber.m.y,
+                                               fiber.n.x, fiber.n.y])
     #pdb.gimp_paintbrush_default(flayers[rand], 4, [Ax, Ay, Bx, By])
     #pdb.gimp_paintbrush_default(flayers[0], 4, [100, 100, 300, 500])
 
@@ -169,7 +182,7 @@ def peignage(img,
                 "density": f_density,
                 "hardness": f_hardness }
 
-    #pdb.gimp_image_undo_group_start(img)
+    pdb.gimp_image_undo_group_start(img)
 
     # Store current background color
     bg_color_tmp = gimp.get_background()
@@ -203,21 +216,7 @@ def peignage(img,
     gimp.set_background(bg_color_tmp)
     gimp.set_foreground(fg_color_tmp)
 
-    #pdb.gimp_image_undo_group_end(img)
-
-
-
-    """
-    # Extract islands
-    pdb.gimp_context_set_antialias(False)
-    pdb.gimp_context_set_feather(noise_smoothness)
-    if noise_smoothness:
-        pdb.gimp_context_set_feather_radius(50, 50)
-    pdb.gimp_context_set_sample_threshold(0.5)
-    pdb.gimp_image_select_color(img, CHANNEL_OP_REPLACE, layer_noise, "white")
-
-    pdb.gimp_selection_invert(img)
-    """
+    pdb.gimp_image_undo_group_end(img)
 
 
 register(
