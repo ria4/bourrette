@@ -13,6 +13,34 @@ W_B = 0.0594682389829
 W_C = -6.96725624648
 
 
+class Point:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def rotate(self, cos_t, sin_t):
+        x = self.x
+        y = self.y
+        self.x = x*cos_t - y*sin_t
+        self.y = x*sin_t + y*cos_t
+
+    def translate(self, tx, ty):
+        self.x += tx
+        self.y += ty
+
+class Fiber:
+    def __init__(self, pt_m, pt_n):
+        self.m = pt_m
+        self.n = pt_n
+
+    def rotate(self, cos_t, sin_t):
+        self.m.rotate(cos_t, sin_t)
+        self.n.rotate(cos_t, sin_t)
+
+    def translate(self, tx, ty):
+        self.m.translate(tx, ty)
+        self.n.translate(tx, ty)
+
 class Grid:
     def __init__(self, img, fparams):
         # Imported constants
@@ -20,10 +48,11 @@ class Grid:
         self.h_img = img.height
         self.l = fparams["length"]
         self.d = fparams["width"]
-        self.r = fparams["width"] / 2.0
+        self.params = fparams
         # Internal frame
-        self.w_in = self.w_img - 2*r
-        self.h_in = self.h_img - 2*r
+        self.r = fparams["width"] / 2.0
+        self.w_in = self.w_img - 2*self.r
+        self.h_in = self.h_img - 2*self.r
         # Precomputed trigonometrics
         self.cos_t = math.cos(math.radians(fparams["orientation"]))
         self.sin_t = math.sin(math.radians(fparams["orientation"]))
@@ -31,9 +60,9 @@ class Grid:
         self.w = self.h_in*self.sin_t + self.w_in*self.cos_t + self.l
         self.h = self.h_in*self.cos_t + self.w_in*self.sin_t
         # Cells
-        self.n_lines = int(self.h / self.d) + 2
-        self.grid_x_0 = [i * self.l / self.n_lines for i in range(self.n_lines)]
-        self.n_columns = int(self.w / self.l)
+        self.n_lin = int(self.h / self.d) + 2
+        self.points_x0 = [i * self.l / self.n_lin for i in range(self.n_lin)]
+        self.n_col = int(self.w / self.l)
         # Translation
         self.tx = self.r - self.l*self.cos_t + self.w_in*self.sin_t*self.sin_t
         self.ty = self.r - self.l*self.sin_t - self.w_in*self.sin_t*self.cos_t
@@ -41,29 +70,35 @@ class Grid:
         self.reset()
 
     def reset(self):
-        self.coordinates = []
-        grid_y_0 = -self.d * random.random()
-        random.shuffle(self.grid_x_0)
-        for i in range(self.n_lines):
-            line_abscissae = []
-            for j in range(self.n_columns):
-                line_abscissae.append(self.grid_x_0[i] + j*self.l)
-            self.coordinates.append([line_abscissae, grid_y_0 + i*self.d])
+        self.points = []
+        self.fibers = []
+        points_y0 = -self.d * random.random()
+        random.shuffle(self.points_x0)
+        for i in range(self.n_lin):
+            y = points_y0 + i*self.d
+            for j in range(self.n_col):
+                x = self.points_x0[i] + j*self.l
+                self.points.append(Point(x, y))
 
-    def rotate_translate(self):
-        coordinates = []
-        for i in range(self.n_lines):
-            y_old = self.coordinates[i][1]
-            line_abscissae = []
-            for j in range(self.n_columns):
-                x_old = self.coordinates[i][0][j]
-                x_new = x_old*self.cos_t - y_old*self.sin_t + self.tx
-                grid_line_abscissae.append(x_new)
-            y_new = x_old*self.sin_t + y_old*self.cos_t + self.ty
-            coordinates.append([grid_line_abscissae, y_new])
-        self.coordinates = coordinates
+    def rotate_points(self):
+        for point in self.points:
+            point.rotate(self.cos_t, self.sin_t)
 
-    # def creer points couples
+    def rotate_fibers(self):
+        for fiber in self.fibers:
+            fiber.rotate(self.cos_t, self.sin_t)
+
+    def translate_points(self):
+        for point in self.points:
+            point.translate(self.tx, self.ty)
+
+    def translate_fibers(self):
+        for fiber in self.fibers:
+            fiber.translate(self.tx, self.ty)
+
+    def points_to_fibers(self):
+        pass
+
     # tester
     # def projeter points aux frontières
     # def filtrer segments trop courts
