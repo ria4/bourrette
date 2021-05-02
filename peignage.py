@@ -21,8 +21,8 @@ class Point:
     def rotate(self, cos_t, sin_t):
         x = self.x
         y = self.y
-        self.x = x*cos_t - y*sin_t
-        self.y = x*sin_t + y*cos_t
+        self.x = + x*cos_t + y*sin_t
+        self.y = - x*sin_t + y*cos_t
 
     def translate(self, tx, ty):
         self.x += tx
@@ -35,7 +35,7 @@ class Fiber:
     def __init__(self, point, l, cos_t, sin_t, variation):
         self.m = point
         self.n = point.copy()
-        self.n.translate(l/2.0*cos_t, l/2.0*sin_t) #XXX
+        self.n.translate(l*.7, 0) #XXX
 
     def rotate(self, cos_t, sin_t):
         self.m.rotate(cos_t, sin_t)
@@ -61,15 +61,19 @@ class Grid:
         self.cos_t = math.cos(math.radians(fparams["orientation"]))
         self.sin_t = math.sin(math.radians(fparams["orientation"]))
         # Dimensions
-        self.w = self.h_in*self.sin_t + self.w_in*self.cos_t + self.l
-        self.h = self.h_in*self.cos_t + self.w_in*self.sin_t
+        self.w = self.w_in*self.cos_t + self.h_in*abs(self.sin_t) + self.l
+        self.h = self.h_in*self.cos_t + self.w_in*abs(self.sin_t)
         # Cells
-        self.n_lin = int(self.h / self.d) + 2
+        self.n_lin = int(self.h / self.d) + 3
         self.points_x0 = [i * self.l / self.n_lin for i in range(self.n_lin)]
-        self.n_col = int(self.w / self.l)
+        self.n_col = int(self.w / self.l) + 1
         # Translation
-        self.tx = self.r - self.l*self.cos_t + self.w_in*self.sin_t*self.sin_t
-        self.ty = self.r - self.l*self.sin_t - self.w_in*self.sin_t*self.cos_t
+        if fparams["orientation"] >= 0:
+            self.tx = self.r - self.l*self.cos_t - self.h_in*self.sin_t*self.cos_t
+            self.ty = self.r + self.l*self.sin_t + self.h_in*self.sin_t*self.sin_t
+        else:
+            self.tx = self.r - self.l*self.cos_t + self.w_in*self.sin_t*self.sin_t
+            self.ty = self.r + self.l*self.sin_t + self.w_in*self.sin_t*self.cos_t
 
         self.reset()
 
@@ -138,6 +142,8 @@ def new_fiber_channels(img, fparams):
     # Paint over multiple layers
     g = Grid(img, fparams)
     g.points_to_fibers()
+    g.rotate_fibers()
+    g.translate_fibers()
 
     for fiber in g.fibers:
         layer = random.choice(flayers)
