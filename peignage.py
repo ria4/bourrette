@@ -32,10 +32,15 @@ class Point:
         return Point(self.x, self.y)
 
 class Fiber:
-    def __init__(self, point, l, cos_t, sin_t, variation):
+    def __init__(self, point, l, variation):
         self.m = point
         self.n = point.copy()
-        self.n.translate(l*.7, 0) #XXX
+        if variation == 0:
+            self.n.translate(l, 0)
+        else:
+            dl = variation/10.0 * random.triangular(.5, 2, 1)
+            dt = variation/10.0 * random.triangular(-math.pi/2.0, math.pi/2.0)
+            self.n.translate(l*(1+dl)*math.cos(dt), l*(1+dl)*math.sin(dt))
 
     def rotate(self, cos_t, sin_t):
         self.m.rotate(cos_t, sin_t)
@@ -66,14 +71,16 @@ class Grid:
         # Cells
         self.n_lin = int(self.h / self.d) + 3
         self.points_x0 = [i * self.l / self.n_lin for i in range(self.n_lin)]
-        self.n_col = int(self.w / self.l) + 1
+        self.n_col = int(self.w / (self.l*1.3)) + 1
         # Translation
+        self.tx = self.r - self.l*self.cos_t
+        self.ty = self.r + self.l*self.sin_t
         if fparams["orientation"] >= 0:
-            self.tx = self.r - self.l*self.cos_t - self.h_in*self.sin_t*self.cos_t
-            self.ty = self.r + self.l*self.sin_t + self.h_in*self.sin_t*self.sin_t
+            self.tx -= self.h_in*self.sin_t*self.cos_t
+            self.ty += self.h_in*self.sin_t*self.sin_t
         else:
-            self.tx = self.r - self.l*self.cos_t + self.w_in*self.sin_t*self.sin_t
-            self.ty = self.r + self.l*self.sin_t + self.w_in*self.sin_t*self.cos_t
+            self.tx += self.w_in*self.sin_t*self.sin_t
+            self.ty += self.w_in*self.sin_t*self.cos_t
 
         self.reset()
 
@@ -85,7 +92,7 @@ class Grid:
         for i in range(self.n_lin):
             y = points_y0 + i*self.d
             for j in range(self.n_col):
-                x = self.points_x0[i] + j*self.l
+                x = self.points_x0[i] + j*(self.l*1.3)
                 self.points.append(Point(x, y))
 
     def rotate_points(self):
@@ -107,8 +114,7 @@ class Grid:
     def points_to_fibers(self):
         self.fibers = []
         for point in self.points:
-            f = Fiber(point, self.l, self.cos_t, self.sin_t,
-                      self.params["variation"])
+            f = Fiber(point, self.l, self.params["variation"])
             self.fibers.append(f)
 
     # def projeter points aux frontieres
