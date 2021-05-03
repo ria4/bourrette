@@ -34,12 +34,21 @@ class Point:
 class Fiber:
     def __init__(self, point, l, variation):
         self.m = point
-        self.n = point.copy()
         if variation == 0:
+            self.n = self.m.copy()
             self.n.translate(l, 0)
         else:
-            dl = variation/10.0 * random.triangular(.5, 2, 1)
-            dt = variation/10.0 * random.triangular(-math.pi/2.0, math.pi/2.0)
+            #XXX refine constants here
+            # Displace first point
+            dl = random.uniform(0, variation/20.0)
+            dt = random.uniform(-math.pi, math.pi)
+            self.m.translate(l*dl*math.cos(dt), l*dl*math.sin(dt))
+            # Compute second point
+            dl = random.uniform(-.25, 1) + random.triangular(.25, 1, .5)
+            dl *= variation / 10.0
+            dt = random.triangular(-math.pi/2.0, math.pi/2.0)
+            dt *= variation**1.6 / 39.8         # 39.8 = 10**1.6
+            self.n = self.m.copy()
             self.n.translate(l*(1+dl)*math.cos(dt), l*(1+dl)*math.sin(dt))
 
     def rotate(self, cos_t, sin_t):
@@ -49,6 +58,44 @@ class Fiber:
     def translate(self, tx, ty):
         self.m.translate(tx, ty)
         self.n.translate(tx, ty)
+
+    def trim_to_borders(self, w_img, h_img, r, l):
+        r *= 5          #XXX debug, to be deleted(?)
+        wr = w_img - r
+        hr = h_img - r
+        # both points inside frame
+        if ((r <= self.m.x <= wr) and
+            (r <= self.m.y <= hr) and
+            (r <= self.n.x <= wr) and
+            (r <= self.n.y <= hr)):
+            return True
+        # both points outside frame & in same external sector
+        if ((self.m.x < r and self.n.x < r) or
+            (self.m.y < r and self.n.y < r) or
+            (self.m.x > wr and self.n.x > wr) or
+            (self.m.y > hr and self.n.y > hr)):
+            return False
+        # case x = constant (...approximately)
+        if abs(self.n.x - self.m.x) < 1:
+            c = self.m.x
+            if self.n.y > self.m.y:
+                if self.n.y > hr:
+                    self.n.y = hr
+                if self.m.y < r:
+                    self.m.y = r
+            else:
+                if self.m.y > hr:
+                    self.m.y = hr
+                if self.n.y < r:
+                    self.n.y = r
+            return (self.get_length() > .5*l)
+        # case y = ax + b
+        a = (self.n.y - self.m.y) / (self.n.x - self.m.x)
+        b = self.m.y - a * self.m.x
+        return True
+
+    def get_length(self):
+        return math.sqrt((self.n.y-self.m.y)**2 + (self.n.x-self.m.x)**2)
 
 class Grid:
     def __init__(self, img, fparams):
@@ -112,13 +159,19 @@ class Grid:
             fiber.translate(self.tx, self.ty)
 
     def points_to_fibers(self):
+        # Give every point a sibling point to make a fiber
         self.fibers = []
         for point in self.points:
             f = Fiber(point, self.l, self.params["variation"])
             self.fibers.append(f)
 
-    # def projeter points aux frontieres
-    # def filtrer segments trop courts
+    def trim_to_borders(self):
+        # Remove fibers outside borders or too short once trimmed
+        self.fibers[:] = [fiber for fiber in self.fibers \
+            if fiber.trim_to_borders(self.w_img, self.h_img, self.r, self.l) ]
+
+
+    # def projeter points aux frontieres + filtrer segments trop courts
     # def decimer
 
 
@@ -150,6 +203,7 @@ def new_fiber_channels(img, fparams):
     g.points_to_fibers()
     g.rotate_fibers()
     g.translate_fibers()
+    g.trim_to_borders()
 
     for fiber in g.fibers:
         layer = random.choice(flayers)
@@ -210,6 +264,9 @@ def peignage(img,
         pdb.gimp_image_set_active_channel(img, fiber_channel)
         fiber_mask = pdb.gimp_layer_create_mask(layer, ADD_MASK_CHANNEL)
         pdb.gimp_layer_add_mask(layer, fiber_mask)
+
+    # Loop until non-transparent area is large enough
+    # XXX
 
     # Add brightness on intersecting regions
     if overlap_gain > 0:
