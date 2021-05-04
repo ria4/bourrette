@@ -28,6 +28,9 @@ class Point:
         self.x += tx
         self.y += ty
 
+    def is_inside(self, r, wr, hr):
+        return (r <= self.x <= wr) and (r <= self.y <= hr)
+
     def copy(self):
         return Point(self.x, self.y)
 
@@ -64,10 +67,7 @@ class Fiber:
         wr = w_img - r
         hr = h_img - r
         # both points inside frame
-        if ((r <= self.m.x <= wr) and
-            (r <= self.m.y <= hr) and
-            (r <= self.n.x <= wr) and
-            (r <= self.n.y <= hr)):
+        if self.m.is_inside(r, wr, hr) and self.n.is_inside(r, wr, hr):
             return True
         # both points outside frame & in same external sector
         if ((self.m.x < r and self.n.x < r) or
@@ -88,14 +88,68 @@ class Fiber:
                     self.m.y = hr
                 if self.n.y < r:
                     self.n.y = r
-            return (self.get_length() > .5*l)
+            return self.get_length() > .5*l
+        # case y = constant (...approximately)
+        if abs(self.n.y - self.m.y) < 1:
+            c = self.m.y
+            if self.n.x > self.m.x:
+                if self.n.x > wr:
+                    self.n.x = wr
+                if self.m.x < r:
+                    self.m.x = r
+            else:
+                if self.m.x > wr:
+                    self.m.x = wr
+                if self.n.x < r:
+                    self.n.x = r
+            return self.get_length() > .5*l
         # case y = ax + b
         a = (self.n.y - self.m.y) / (self.n.x - self.m.x)
         b = self.m.y - a * self.m.x
-        return True
+        y1 = a*r+b; y2 = a*wr+b; x1 = (r-b)/a; x2 = (hr-b)/a;
+        intersections = []
+        if r <= y1 <= hr:
+            intersections.append((r, y1))
+        if r <= y2 <= hr:
+            intersections.append((wr, y2))
+        if r <= x1 <= wr:
+            intersections.append((x1, r))
+        if r <= x2 <= wr:
+            intersections.append((x2, hr))
+        # there should be exactly 0 or 2 intersections
+        if not intersections:
+            return False
+        elif len(intersections) == 2:
+            m = Point(intersections[0][0], intersections[0][1])
+            n = Point(intersections[1][0], intersections[1][1])
+            if self.contains(m):
+                if self.contains(n):
+                    self.m = m
+                    self.n = n
+                else:
+                    if not self.m.is_inside(r, wr, hr):
+                        self.m = m
+                    else:
+                        self.n = m
+            else:
+                if not self.m.is_inside(r, wr, hr):
+                    self.m = n
+                else:
+                    self.n = n
+            return self.get_length() > .5*l
+
+    def contains(self, point):
+        # test if a point on the fiber line is actually on the fiber segment
+        kp = (self.n.y-self.m.y)*(point.y-self.m.y) + \
+                (self.n.x-self.m.x)*(point.x-self.m.x)
+        kf = self.get_length_2()
+        return 0 <= kp <= kf
+
+    def get_length_2(self):
+        return (self.n.y-self.m.y)**2 + (self.n.x-self.m.x)**2
 
     def get_length(self):
-        return math.sqrt((self.n.y-self.m.y)**2 + (self.n.x-self.m.x)**2)
+        return math.sqrt(self.get_length_2())
 
 class Grid:
     def __init__(self, img, fparams):
