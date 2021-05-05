@@ -228,7 +228,11 @@ class Grid:
         self.fibers[:] = [fiber for fiber in self.fibers \
             if fiber.trim_to_borders(self.w_img, self.h_img, self.r) ]
 
-    # def decimer
+    #XXX def decimer
+    #XXX constante ecartement fibres? 1.7?
+#XXX verifier l'etalement des fibres sur toute la largeur, cf. points_x0
+#XXX def coverage() -> access histogram area
+# mean, std_dev, median, pixels, count, percentile = pdb.gimp_drawable_histogram(drawable, HISTOGRAM_VALUE, 0, 1)
 
 
 def new_fiber_channels(img, fparams):
@@ -277,6 +281,9 @@ def new_fiber_channels(img, fparams):
         fchannel = pdb.gimp_selection_save(img)
         fchannels.append(fchannel)
 
+    # Loop until non-transparent area is large enough
+    # XXX use density parameter here
+
     return fchannels
 
 
@@ -288,7 +295,7 @@ def peignage(img,
              f_messiness=0,
              f_density=5,
              f_hardness=8,
-             overlap_gain=0):
+             smooth_overlap=0):
 
     # Scale user input exponentially
     f_width_exp = img.height * math.exp(W_A*f_width**2 + W_B*f_width + W_C)
@@ -319,17 +326,16 @@ def peignage(img,
         fiber_mask = pdb.gimp_layer_create_mask(layer, ADD_MASK_CHANNEL)
         pdb.gimp_layer_add_mask(layer, fiber_mask)
 
-    # Loop until non-transparent area is large enough
-    # XXX use density parameter here
-
-    # Add brightness on intersecting regions
-    if overlap_gain > 0:
-        for layer in img.layers()[1:]:
-            overlap = layer.copy()
-            overlap.mode = ADDITION_MODE
-            pdb.gimp_image_raise_item_to_top(img, overlap)
-            pdb.gimp_drawable_brightness_contrast(overlap, overlap_gain / 20.0, 0)
-            pdb.gimp_image_merge_down(img, overlap, CLIP_TO_IMAGE)
+    # Mingle layers on intersection areas
+    if smooth_overlap:
+        pdb.gimp_selection_all(img)
+        for layer in img.layers:
+            pdb.gimp_image_raise_item_to_top(img, layer)
+            for layer in img.layers[1:]:
+                overlap = layer.copy()
+                overlap.mode = LAYER_MODE_SOFTLIGHT
+                img.add_layer(overlap, 0)
+                pdb.gimp_image_merge_down(img, overlap, CLIP_TO_IMAGE)
 
     # Merge all fiber layers
     pdb.gimp_image_merge_visible_layers(img, CLIP_TO_IMAGE)
@@ -344,8 +350,8 @@ def peignage(img,
 
 register(
  "python-fu-peignage",
- "Mingle layers like silk fibers",
- "Mingle layers like silk fibers",
+ "Mingle layers like silk waste fibers",
+ "Mingle layers like silk waste fibers",
  "Oriane Tury",
  "GNU GPLv3",
  "2021",
@@ -358,7 +364,9 @@ register(
   (PF_SLIDER, "f_messiness", "Fibers Messiness", 0, (0, 10, 1)),
   (PF_SLIDER, "f_density", "Fibers Density", 5, (1, 10, 1)),
   (PF_SLIDER, "f_hardness", "Fibers Hardness", 8, (0, 10, 1)),
-  (PF_SLIDER, "overlap_gain", "Overlap Gain", 0, (0, 10, 1)),
+  (PF_SLIDER, "smooth_overlap", "Smooth Overlap", 0, (0, 1, 1)),
+  # the last one could be a PF_BOOL,
+  # except i don't care much for the bulky UI button
  ],
  [],
  peignage)
