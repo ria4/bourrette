@@ -12,6 +12,8 @@ W_A = 3.27285167629e-05
 W_B = 0.0594682389829
 W_C = -6.96725624648
 
+# Constants for fiber drawing
+MAX_L_VARIATION = .25
 
 class Point:
     def __init__(self, x, y):
@@ -35,22 +37,21 @@ class Point:
         return Point(self.x, self.y)
 
 class Fiber:
-    def __init__(self, point, l, variation):
+    def __init__(self, point, l, messiness):
+        self.l_base = l
         self.m = point
-        if variation == 0:
+        if messiness == 0:
             self.n = self.m.copy()
             self.n.translate(l, 0)
         else:
-            #XXX refine constants here
             # Displace first point
-            dl = random.uniform(0, variation/20.0)
+            dl = random.triangular(0, min(messiness, 5)/10.0, 0)
             dt = random.uniform(-math.pi, math.pi)
             self.m.translate(l*dl*math.cos(dt), l*dl*math.sin(dt))
             # Compute second point
-            dl = random.uniform(-.25, 1) + random.triangular(.25, 1, .5)
-            dl *= variation / 10.0
+            dl = random.triangular(-MAX_L_VARIATION, MAX_L_VARIATION)
             dt = random.triangular(-math.pi/2.0, math.pi/2.0)
-            dt *= variation**1.6 / 39.8         # 39.8 = 10**1.6
+            dt *= messiness**1.6 / 10**1.6
             self.n = self.m.copy()
             self.n.translate(l*(1+dl)*math.cos(dt), l*(1+dl)*math.sin(dt))
 
@@ -62,8 +63,8 @@ class Fiber:
         self.m.translate(tx, ty)
         self.n.translate(tx, ty)
 
-    def trim_to_borders(self, w_img, h_img, r, l):
-        r *= 5          #XXX debug, to be deleted(?)
+    def trim_to_borders(self, w_img, h_img, r):
+        r *= 4          #XXX debug, to be deleted(?)
         wr = w_img - r
         hr = h_img - r
         # both points inside frame
@@ -88,7 +89,7 @@ class Fiber:
                     self.m.y = hr
                 if self.n.y < r:
                     self.n.y = r
-            return self.get_length() > .5*l
+            return self.is_long_enough()
         # case y = constant (...approximately)
         if abs(self.n.y - self.m.y) < 1:
             c = self.m.y
@@ -102,7 +103,7 @@ class Fiber:
                     self.m.x = wr
                 if self.n.x < r:
                     self.n.x = r
-            return self.get_length() > .5*l
+            return self.is_long_enough()
         # case y = ax + b
         a = (self.n.y - self.m.y) / (self.n.x - self.m.x)
         b = self.m.y - a * self.m.x
@@ -136,7 +137,7 @@ class Fiber:
                     self.m = n
                 else:
                     self.n = n
-            return self.get_length() > .5*l
+            return self.is_long_enough()
 
     def contains(self, point):
         # test if a point on the fiber line is actually on the fiber segment
@@ -144,6 +145,9 @@ class Fiber:
                 (self.n.x-self.m.x)*(point.x-self.m.x)
         kf = self.get_length_2()
         return 0 <= kp <= kf
+
+    def is_long_enough(self):
+        return self.get_length() > (1 - MAX_L_VARIATION) * self.l_base
 
     def get_length_2(self):
         return (self.n.y-self.m.y)**2 + (self.n.x-self.m.x)**2
@@ -172,7 +176,7 @@ class Grid:
         # Cells
         self.n_lin = int(self.h / self.d) + 3
         self.points_x0 = [i * self.l / self.n_lin for i in range(self.n_lin)]
-        self.n_col = int(self.w / (self.l*1.3)) + 1
+        self.n_col = int(self.w / (self.l*1.7)) + 1
         # Translation
         self.tx = self.r - self.l*self.cos_t
         self.ty = self.r + self.l*self.sin_t
@@ -193,7 +197,7 @@ class Grid:
         for i in range(self.n_lin):
             y = points_y0 + i*self.d
             for j in range(self.n_col):
-                x = self.points_x0[i] + j*(self.l*1.3)
+                x = self.points_x0[i] + j*(self.l*1.7)
                 self.points.append(Point(x, y))
 
     def rotate_points(self):
@@ -216,16 +220,14 @@ class Grid:
         # Give every point a sibling point to make a fiber
         self.fibers = []
         for point in self.points:
-            f = Fiber(point, self.l, self.params["variation"])
+            f = Fiber(point, self.l, self.params["messiness"])
             self.fibers.append(f)
 
     def trim_to_borders(self):
         # Remove fibers outside borders or too short once trimmed
         self.fibers[:] = [fiber for fiber in self.fibers \
-            if fiber.trim_to_borders(self.w_img, self.h_img, self.r, self.l) ]
+            if fiber.trim_to_borders(self.w_img, self.h_img, self.r) ]
 
-
-    # def projeter points aux frontieres + filtrer segments trop courts
     # def decimer
 
 
@@ -263,8 +265,6 @@ def new_fiber_channels(img, fparams):
         layer = random.choice(flayers)
         pdb.gimp_paintbrush_default(layer, 4, [fiber.m.x, fiber.m.y,
                                                fiber.n.x, fiber.n.y])
-    #pdb.gimp_paintbrush_default(flayers[rand], 4, [Ax, Ay, Bx, By])
-    #pdb.gimp_paintbrush_default(flayers[0], 4, [100, 100, 300, 500])
 
     # Create channels based on brightness levels
     # White noise means full effect, black noise means no effect
@@ -285,7 +285,7 @@ def peignage(img,
              f_length=50,
              f_width=50,
              f_orientation=0,
-             f_variation=0,
+             f_messiness=0,
              f_density=5,
              f_hardness=8,
              overlap_gain=0):
@@ -298,7 +298,7 @@ def peignage(img,
     fparams = { "length": f_length_exp,
                 "width": f_width_exp,
                 "orientation": f_orientation,
-                "variation": f_variation,
+                "messiness": f_messiness,
                 "density": f_density,
                 "hardness": f_hardness }
 
@@ -320,7 +320,7 @@ def peignage(img,
         pdb.gimp_layer_add_mask(layer, fiber_mask)
 
     # Loop until non-transparent area is large enough
-    # XXX
+    # XXX use density parameter here
 
     # Add brightness on intersecting regions
     if overlap_gain > 0:
@@ -355,7 +355,7 @@ register(
   (PF_SLIDER, "f_length", "Fibers Length", 50, (1, 100, 1)),
   (PF_SLIDER, "f_width", "Fibers Width", 50, (1, 100, 1)),
   (PF_SLIDER, "f_orientation", "Fibers Orientation", 0, (-90, 90, 1)),
-  (PF_SLIDER, "f_variation", "Fibers Variation", 0, (0, 10, 1)),
+  (PF_SLIDER, "f_messiness", "Fibers Messiness", 0, (0, 10, 1)),
   (PF_SLIDER, "f_density", "Fibers Density", 5, (1, 10, 1)),
   (PF_SLIDER, "f_hardness", "Fibers Hardness", 8, (0, 10, 1)),
   (PF_SLIDER, "overlap_gain", "Overlap Gain", 0, (0, 10, 1)),
