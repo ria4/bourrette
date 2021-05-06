@@ -187,8 +187,6 @@ class Grid:
             self.tx += self.w_in*self.sin_t*self.sin_t
             self.ty += self.w_in*self.sin_t*self.cos_t
 
-        self.reset()
-
     def reset(self):
         self.points = []
         self.fibers = []
@@ -231,9 +229,12 @@ class Grid:
     #XXX def decimer
     #XXX constante ecartement fibres? 1.7?
 #XXX verifier l'etalement des fibres sur toute la largeur, cf. points_x0
-#XXX def coverage() -> access histogram area
-# mean, std_dev, median, pixels, count, percentile = pdb.gimp_drawable_histogram(drawable, HISTOGRAM_VALUE, 0, 1)
 
+
+def get_coverage(drawable, area_covered_max):
+    mean, std_dev, median, pixels, count, percentile = \
+            pdb.gimp_drawable_histogram(drawable, HISTOGRAM_VALUE, 0, 1)
+    return pixels * 1.0 / area_covered_max
 
 def new_fiber_channels(img, fparams):
     """
@@ -253,22 +254,44 @@ def new_fiber_channels(img, fparams):
         pdb.gimp_drawable_edit_fill(flayer, FILL_BACKGROUND)
         flayers.append(flayer)
 
+    # Instantiate transparent union layer
+    layer_union = gimp.Layer(img, "Fibers", img.width, img.height,
+                             RGBA_IMAGE, 100, LAYER_MODE_NORMAL)
+    layer_union.name = "Fibers Union"
+    img.add_layer(layer_union, 0)
+    pdb.gimp_drawable_edit_fill(layer_union, FILL_TRANSPARENT)
+
     # Set base brush parameters
     pdb.gimp_context_set_brush("2. Hardness 050")
     pdb.gimp_context_set_brush_size(fparams["width"])
     pdb.gimp_context_set_brush_hardness(fparams["hardness"] / 10.0)
 
-    # Paint over multiple layers
+    # Create grid
     g = Grid(img, fparams)
+    area_covered_max = g.w_in * g.h_in
+
+    # Loop until non-transparent area is large enough
+    # XXX use density parameter here
+
+    # Paint over multiple layers
+    g.reset()
     g.points_to_fibers()
     g.rotate_fibers()
     g.translate_fibers()
     g.trim_to_borders()
 
+    random.shuffle(g.fibers)
+    # CYCLE_FACTOR makes sure that there's no one layer prioritized
+    # (i.e. covering up too often) over the others
+    CYCLE_FACTOR = 4
+    n_cycle = len(g.fibers) / (len(flayers) * CYCLE_FACTOR)
+
     for fiber in g.fibers:
         layer = random.choice(flayers)
         pdb.gimp_paintbrush_default(layer, 4, [fiber.m.x, fiber.m.y,
                                                fiber.n.x, fiber.n.y])
+        pdb.gimp_paintbrush_default(layer_union, 4, [fiber.m.x, fiber.m.y,
+                                                     fiber.n.x, fiber.n.y])
 
     # Create channels based on brightness levels
     # White noise means full effect, black noise means no effect
@@ -280,9 +303,6 @@ def new_fiber_channels(img, fparams):
         img.remove_layer(flayer)
         fchannel = pdb.gimp_selection_save(img)
         fchannels.append(fchannel)
-
-    # Loop until non-transparent area is large enough
-    # XXX use density parameter here
 
     return fchannels
 
