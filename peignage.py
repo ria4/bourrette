@@ -4,6 +4,9 @@ import random
 from gimpfu import *
 
 
+# Hey! It's a debug switch!
+DEBUG = False
+
 # Constants for exponential input conversion
 L_A = -0.000344125449991
 L_B = 0.11153346297
@@ -14,6 +17,7 @@ W_C = -6.96725624648
 
 # Constants for fiber drawing
 MAX_L_VARIATION = .25
+
 
 class Point:
     def __init__(self, x, y):
@@ -35,6 +39,7 @@ class Point:
 
     def copy(self):
         return Point(self.x, self.y)
+
 
 class Fiber:
     def __init__(self, point, l, messiness):
@@ -64,7 +69,7 @@ class Fiber:
         self.n.translate(tx, ty)
 
     def trim_to_borders(self, w_img, h_img, r):
-        r *= 4          #XXX debug, to be deleted(?)
+        r *= 4          #XXX to be deleted(?)
         wr = w_img - r
         hr = h_img - r
         # both points inside frame
@@ -155,6 +160,7 @@ class Fiber:
     def get_length(self):
         return math.sqrt(self.get_length_2())
 
+
 class Grid:
     def __init__(self, img, fparams):
         # Imported constants
@@ -186,10 +192,12 @@ class Grid:
         else:
             self.tx += self.w_in*self.sin_t*self.sin_t
             self.ty += self.w_in*self.sin_t*self.cos_t
-
-    def reset(self):
+        # Points & Fibers
         self.points = []
         self.fibers = []
+
+    def create_points(self):
+        self.points = []
         points_y0 = -self.d * random.random()
         random.shuffle(self.points_x0)
         for i in range(self.n_lin):
@@ -198,33 +206,36 @@ class Grid:
                 x = self.points_x0[i] + j*(self.l*1.7)
                 self.points.append(Point(x, y))
 
-    def rotate_points(self):
-        for point in self.points:
-            point.rotate(self.cos_t, self.sin_t)
-
-    def rotate_fibers(self):
-        for fiber in self.fibers:
-            fiber.rotate(self.cos_t, self.sin_t)
-
-    def translate_points(self):
-        for point in self.points:
-            point.translate(self.tx, self.ty)
-
-    def translate_fibers(self):
-        for fiber in self.fibers:
-            fiber.translate(self.tx, self.ty)
-
-    def points_to_fibers(self):
-        # Give every point a sibling point to make a fiber
+    def create_fibers(self):
+        # Give every point a sibling point
         self.fibers = []
         for point in self.points:
             f = Fiber(point, self.l, self.params["messiness"])
             self.fibers.append(f)
 
-    def trim_to_borders(self):
+    def rotate_fibers(self):
+        for fiber in self.fibers:
+            fiber.rotate(self.cos_t, self.sin_t)
+
+    def translate_fibers(self):
+        for fiber in self.fibers:
+            fiber.translate(self.tx, self.ty)
+
+    def trim_fibers(self):
         # Remove fibers outside borders or too short once trimmed
         self.fibers[:] = [fiber for fiber in self.fibers \
             if fiber.trim_to_borders(self.w_img, self.h_img, self.r) ]
+
+    def shuffle_fibers(self):
+        random.shuffle(self.fibers)
+
+    def setup_fibers(self):
+        self.create_points()
+        self.create_fibers()
+        self.rotate_fibers()
+        self.translate_fibers()
+        self.trim_fibers()
+        self.shuffle_fibers()
 
     #XXX def decimer
     #XXX constante ecartement fibres? 1.7?
@@ -236,75 +247,103 @@ def get_coverage(drawable, area_covered_max):
             pdb.gimp_drawable_histogram(drawable, HISTOGRAM_VALUE, 0, 1)
     return pixels * 1.0 / area_covered_max
 
-def new_fiber_channels(img, fparams):
-    """
-    Return an array of correlated fiber channels.
-    The length of the array equals the number of layers in img.
-    """
+
+def make_fiber_collage(img, fparams):
+
+    # Insulate base layers
+    n_layers = len(img.layers)
+    base_layers = list(img.layers)
+    for layer in base_layers:
+        pdb.gimp_item_set_visible(layer, False)
+
     # Set background and foreground colors
     gimp.set_background("black")
     gimp.set_foreground("white")
-
-    # Instantiate black layers
-    flayers = []
-    for i in range(len(img.layers)):
-        flayer = gimp.Layer(img, "Fibers", img.width, img.height,
-                            RGBA_IMAGE, 100, LAYER_MODE_NORMAL)
-        img.add_layer(flayer, 0)
-        pdb.gimp_drawable_edit_fill(flayer, FILL_BACKGROUND)
-        flayers.append(flayer)
-
-    # Instantiate transparent union layer
-    layer_union = gimp.Layer(img, "Fibers", img.width, img.height,
-                             RGBA_IMAGE, 100, LAYER_MODE_NORMAL)
-    layer_union.name = "Fibers Union"
-    img.add_layer(layer_union, 0)
-    pdb.gimp_drawable_edit_fill(layer_union, FILL_TRANSPARENT)
 
     # Set base brush parameters
     pdb.gimp_context_set_brush("2. Hardness 050")
     pdb.gimp_context_set_brush_size(fparams["width"])
     pdb.gimp_context_set_brush_hardness(fparams["hardness"] / 10.0)
 
-    # Create grid
+    # Instantiate black mask layer
+    layer_mask = gimp.Layer(img, "Fibers Mask", img.width, img.height,
+                            RGBA_IMAGE, 100, LAYER_MODE_NORMAL)
+    pdb.gimp_item_set_visible(layer_mask, False)
+    pdb.gimp_displays_flush()
+    img.add_layer(layer_mask, n_layers)
+
+    # Instantiate transparent collage layer
+    layer_collage = gimp.Layer(img, "Fibers Collage", img.width, img.height,
+                               RGBA_IMAGE, 100, LAYER_MODE_NORMAL)
+    pdb.gimp_drawable_fill(layer_collage, FILL_TRANSPARENT)
+    img.add_layer(layer_collage, 0)
+
+    # Initialize grid
     g = Grid(img, fparams)
     area_covered_max = g.w_in * g.h_in
 
     # Loop until non-transparent area is large enough
     # XXX use density parameter here
 
-    # Paint over multiple layers
-    g.reset()
-    g.points_to_fibers()
-    g.rotate_fibers()
-    g.translate_fibers()
-    g.trim_to_borders()
+    # Fill grid with proper fibers
+    g.setup_fibers()
 
-    random.shuffle(g.fibers)
-    # CYCLE_FACTOR makes sure that there's no one layer prioritized
-    # (i.e. covering up too often) over the others
-    CYCLE_FACTOR = 4
-    n_cycle = len(g.fibers) / (len(flayers) * CYCLE_FACTOR)
+    # CYCLE_FACTOR prevents prioritizing one layer over the rest
+    # (otherwise it would cover up the rest disproportionately)
+    CYCLE_FACTOR = 3
+    n_cycle = len(g.fibers) / (n_layers * CYCLE_FACTOR)
 
-    for fiber in g.fibers:
-        layer = random.choice(flayers)
-        pdb.gimp_paintbrush_default(layer, 4, [fiber.m.x, fiber.m.y,
-                                               fiber.n.x, fiber.n.y])
-        pdb.gimp_paintbrush_default(layer_union, 4, [fiber.m.x, fiber.m.y,
-                                                     fiber.n.x, fiber.n.y])
+    for i in range(CYCLE_FACTOR):
 
-    # Create channels based on brightness levels
-    # White noise means full effect, black noise means no effect
-    fchannels = []
-    for flayer in flayers:
-        pdb.gimp_selection_all(img)
-        pdb.plug_in_colortoalpha(img, flayer, "black")
-        pdb.gimp_image_select_item(img, CHANNEL_OP_REPLACE, flayer)
-        img.remove_layer(flayer)
-        fchannel = pdb.gimp_selection_save(img)
-        fchannels.append(fchannel)
+        random.shuffle(base_layers)
 
-    return fchannels
+        for j in range(n_layers):
+
+            # Reset mask layer to full black
+            pdb.gimp_selection_all(img)
+            pdb.gimp_drawable_fill(layer_mask, FILL_BACKGROUND)
+
+            # Draw fibers on layer mask
+            for k in range(n_cycle):
+                fiber = g.fibers[(i*n_layers + j)*n_cycle + k]
+                coords = [fiber.m.x, fiber.m.y, fiber.n.x, fiber.n.y]
+                pdb.gimp_paintbrush_default(layer_mask, 4, coords)
+
+            # Create channel based on brightness levels
+            # White noise means full effect, black noise means no effect
+            pdb.plug_in_colortoalpha(img, layer_mask, "black")
+            pdb.gimp_image_select_item(img, CHANNEL_OP_REPLACE, layer_mask)
+            channel_mask = pdb.gimp_selection_save(img)
+
+            # Create buffer layer
+            # It needs to be visible to be merged down, because reasons
+            layer_buffer = base_layers[j].copy()
+            layer_buffer.name = "Fibers Buffer"
+            pdb.gimp_item_set_visible(layer_buffer, True)
+            img.add_layer(layer_buffer, 1)
+
+            # Add mask channel to buffer layer
+            pdb.gimp_image_set_active_channel(img, channel_mask)
+            mask_buffer = pdb.gimp_layer_create_mask(layer_buffer, ADD_MASK_CHANNEL)
+            pdb.gimp_layer_add_mask(layer_buffer, mask_buffer)
+
+            # Blend intersecting areas with softlight
+            if fparams["overlap"]:
+                layer_buffer_overlap = layer_buffer.copy()
+                layer_buffer_overlap.mode = LAYER_MODE_SOFTLIGHT
+                img.add_layer(layer_buffer_overlap, 0)
+                pdb.gimp_image_merge_down(img, layer_buffer_overlap, CLIP_TO_IMAGE)
+                layer_collage = img.layers[0]
+
+            # Merge collage layer into buffer layer
+            pdb.gimp_image_merge_down(img, layer_collage, CLIP_TO_IMAGE)
+            layer_collage = img.layers[0]
+            layer_collage.name = "Fibers Collage"
+            pdb.gimp_displays_flush()
+            img.remove_channel(channel_mask)
+
+    # Clean up
+    img.remove_layer(layer_mask)
 
 
 def peignage(img,
@@ -313,9 +352,9 @@ def peignage(img,
              f_width=50,
              f_orientation=0,
              f_messiness=0,
-             f_density=5,
+             f_density=6,
              f_hardness=8,
-             smooth_overlap=0):
+             f_overlap=0):
 
     # Scale user input exponentially
     f_width_exp = img.height * math.exp(W_A*f_width**2 + W_B*f_width + W_C)
@@ -327,45 +366,30 @@ def peignage(img,
                 "orientation": f_orientation,
                 "messiness": f_messiness,
                 "density": f_density,
-                "hardness": f_hardness }
+                "hardness": f_hardness,
+                "overlap": f_overlap }
 
-    pdb.gimp_image_undo_group_start(img)
+    if not DEBUG:
+        pdb.gimp_image_undo_group_start(img)
 
     # Store current background color
     bg_color_tmp = gimp.get_background()
     fg_color_tmp = gimp.get_foreground()
 
-    # Create as many fiber channels as there are layers
-    fiber_channels = new_fiber_channels(img, fparams)
+    # Extract fibers from all image layers
+    make_fiber_collage(img, fparams)
 
-    # Apply one fiber mask on each layer
-    for i, fiber_channel in enumerate(fiber_channels):
-        layer = img.layers[i]
-        fiber_channel.name = layer.name
-        pdb.gimp_image_set_active_channel(img, fiber_channel)
-        fiber_mask = pdb.gimp_layer_create_mask(layer, ADD_MASK_CHANNEL)
-        pdb.gimp_layer_add_mask(layer, fiber_mask)
-
-    # Mingle layers on intersection areas
-    if smooth_overlap:
-        pdb.gimp_selection_all(img)
-        for layer in img.layers:
-            pdb.gimp_image_raise_item_to_top(img, layer)
-            for layer in img.layers[1:]:
-                overlap = layer.copy()
-                overlap.mode = LAYER_MODE_SOFTLIGHT
-                img.add_layer(overlap, 0)
-                pdb.gimp_image_merge_down(img, overlap, CLIP_TO_IMAGE)
-
-    # Merge all fiber layers
-    pdb.gimp_image_merge_visible_layers(img, CLIP_TO_IMAGE)
+    # Remove image layers
+    for layer in img.layers[1:]:
+        img.remove_layer(layer)
 
     # Clean up
     pdb.gimp_selection_none(img)
     gimp.set_background(bg_color_tmp)
     gimp.set_foreground(fg_color_tmp)
 
-    pdb.gimp_image_undo_group_end(img)
+    if not DEBUG:
+        pdb.gimp_image_undo_group_end(img)
 
 
 register(
@@ -382,9 +406,9 @@ register(
   (PF_SLIDER, "f_width", "Fibers Width", 50, (1, 100, 1)),
   (PF_SLIDER, "f_orientation", "Fibers Orientation", 0, (-90, 90, 1)),
   (PF_SLIDER, "f_messiness", "Fibers Messiness", 0, (0, 10, 1)),
-  (PF_SLIDER, "f_density", "Fibers Density", 5, (1, 10, 1)),
+  (PF_SLIDER, "f_density", "Fibers Density", 6, (0, 10, 1)),
   (PF_SLIDER, "f_hardness", "Fibers Hardness", 8, (0, 10, 1)),
-  (PF_SLIDER, "smooth_overlap", "Smooth Overlap", 0, (0, 1, 1)),
+  (PF_SLIDER, "f_overlap", "Smooth Overlap", 0, (0, 1, 1)),
   # the last one could be a PF_BOOL,
   # except i don't care much for the bulky UI button
  ],
