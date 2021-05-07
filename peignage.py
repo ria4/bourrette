@@ -17,6 +17,8 @@ W_C = -6.96725624648
 
 # Constants for fiber drawing
 MAX_L_VARIATION = .25
+FIBER_INLINE_GAP = 1.5
+FRAME_PADDING = 1.5
 
 
 class Point:
@@ -34,8 +36,8 @@ class Point:
         self.x += tx
         self.y += ty
 
-    def is_inside(self, r, wr, hr):
-        return (r <= self.x <= wr) and (r <= self.y <= hr)
+    def is_inside(self, p, wp, hp):
+        return (p <= self.x <= wp) and (p <= self.y <= hp)
 
     def copy(self):
         return Point(self.x, self.y)
@@ -68,60 +70,59 @@ class Fiber:
         self.m.translate(tx, ty)
         self.n.translate(tx, ty)
 
-    def trim_to_borders(self, w_img, h_img, r):
-        r *= 4          #XXX to be deleted(?)
-        wr = w_img - r
-        hr = h_img - r
+    def trim(self, w_img, h_img, p):
+        wp = w_img - p
+        hp = h_img - p
         # both points inside frame
-        if self.m.is_inside(r, wr, hr) and self.n.is_inside(r, wr, hr):
+        if self.m.is_inside(p, wp, hp) and self.n.is_inside(p, wp, hp):
             return True
         # both points outside frame & in same external sector
-        if ((self.m.x < r and self.n.x < r) or
-            (self.m.y < r and self.n.y < r) or
-            (self.m.x > wr and self.n.x > wr) or
-            (self.m.y > hr and self.n.y > hr)):
+        if ((self.m.x < p and self.n.x < p) or
+            (self.m.y < p and self.n.y < p) or
+            (self.m.x > wp and self.n.x > wp) or
+            (self.m.y > hp and self.n.y > hp)):
             return False
         # case x = constant (...approximately)
         if abs(self.n.x - self.m.x) < 1:
             c = self.m.x
             if self.n.y > self.m.y:
-                if self.n.y > hr:
-                    self.n.y = hr
-                if self.m.y < r:
-                    self.m.y = r
+                if self.n.y > hp:
+                    self.n.y = hp
+                if self.m.y < p:
+                    self.m.y = p
             else:
-                if self.m.y > hr:
-                    self.m.y = hr
-                if self.n.y < r:
-                    self.n.y = r
+                if self.m.y > hp:
+                    self.m.y = hp
+                if self.n.y < p:
+                    self.n.y = p
             return self.is_long_enough()
         # case y = constant (...approximately)
         if abs(self.n.y - self.m.y) < 1:
             c = self.m.y
             if self.n.x > self.m.x:
-                if self.n.x > wr:
-                    self.n.x = wr
-                if self.m.x < r:
-                    self.m.x = r
+                if self.n.x > wp:
+                    self.n.x = wp
+                if self.m.x < p:
+                    self.m.x = p
             else:
-                if self.m.x > wr:
-                    self.m.x = wr
-                if self.n.x < r:
-                    self.n.x = r
+                if self.m.x > wp:
+                    self.m.x = wp
+                if self.n.x < p:
+                    self.n.x = p
             return self.is_long_enough()
         # case y = ax + b
         a = (self.n.y - self.m.y) / (self.n.x - self.m.x)
         b = self.m.y - a * self.m.x
-        y1 = a*r+b; y2 = a*wr+b; x1 = (r-b)/a; x2 = (hr-b)/a;
+        y1 = a*p+b; y2 = a*wp+b; x1 = (p-b)/a; x2 = (hp-b)/a;
         intersections = []
-        if r <= y1 <= hr:
-            intersections.append((r, y1))
-        if r <= y2 <= hr:
-            intersections.append((wr, y2))
-        if r <= x1 <= wr:
-            intersections.append((x1, r))
-        if r <= x2 <= wr:
-            intersections.append((x2, hr))
+        if p <= y1 <= hp:
+            intersections.append((p, y1))
+        if p <= y2 <= hp:
+            intersections.append((wp, y2))
+        if p <= x1 <= wp:
+            intersections.append((x1, p))
+        if p <= x2 <= wp:
+            intersections.append((x2, hp))
         # there should be exactly 0 or 2 intersections
         if not intersections:
             return False
@@ -133,12 +134,12 @@ class Fiber:
                     self.m = m
                     self.n = n
                 else:
-                    if not self.m.is_inside(r, wr, hr):
+                    if not self.m.is_inside(p, wp, hp):
                         self.m = m
                     else:
                         self.n = m
             else:
-                if not self.m.is_inside(r, wr, hr):
+                if not self.m.is_inside(p, wp, hp):
                     self.m = n
                 else:
                     self.n = n
@@ -170,9 +171,9 @@ class Grid:
         self.d = fparams["width"]
         self.params = fparams
         # Internal frame
-        self.r = fparams["width"] / 2.0
-        self.w_in = self.w_img - 2*self.r
-        self.h_in = self.h_img - 2*self.r
+        self.pad = fparams["width"] / 2.0 * FRAME_PADDING
+        self.w_in = self.w_img - 2*self.pad
+        self.h_in = self.h_img - 2*self.pad
         # Precomputed trigonometrics
         self.cos_t = math.cos(math.radians(fparams["orientation"]))
         self.sin_t = math.sin(math.radians(fparams["orientation"]))
@@ -181,11 +182,12 @@ class Grid:
         self.h = self.h_in*self.cos_t + self.w_in*abs(self.sin_t)
         # Cells
         self.n_lin = int(self.h / self.d) + 3
-        self.points_x0 = [i * self.l / self.n_lin for i in range(self.n_lin)]
-        self.n_col = int(self.w / (self.l*1.7)) + 1
+        self.points_x0 = [i * self.l*FIBER_INLINE_GAP / self.n_lin \
+                for i in range(self.n_lin)]
+        self.n_col = int(self.w / (self.l*FIBER_INLINE_GAP)) + 1
         # Translation
-        self.tx = self.r - self.l*self.cos_t
-        self.ty = self.r + self.l*self.sin_t
+        self.tx = self.pad - self.l*self.cos_t
+        self.ty = self.pad + self.l*self.sin_t
         if fparams["orientation"] >= 0:
             self.tx -= self.h_in*self.sin_t*self.cos_t
             self.ty += self.h_in*self.sin_t*self.sin_t
@@ -203,7 +205,7 @@ class Grid:
         for i in range(self.n_lin):
             y = points_y0 + i*self.d
             for j in range(self.n_col):
-                x = self.points_x0[i] + j*(self.l*1.7)
+                x = self.points_x0[i] + j*(self.l*FIBER_INLINE_GAP)
                 self.points.append(Point(x, y))
 
     def create_fibers(self):
@@ -224,7 +226,7 @@ class Grid:
     def trim_fibers(self):
         # Remove fibers outside borders or too short once trimmed
         self.fibers[:] = [fiber for fiber in self.fibers \
-            if fiber.trim_to_borders(self.w_img, self.h_img, self.r) ]
+            if fiber.trim(self.w_img, self.h_img, self.pad) ]
 
     def shuffle_fibers(self):
         random.shuffle(self.fibers)
@@ -238,8 +240,6 @@ class Grid:
         self.shuffle_fibers()
 
     #XXX def decimer
-    #XXX constante ecartement fibres? 1.7?
-#XXX verifier l'etalement des fibres sur toute la largeur, cf. points_x0
 
 
 def get_coverage(drawable, area_covered_max):
@@ -290,6 +290,7 @@ def make_fiber_collage(img, fparams):
 
     # CYCLE_FACTOR prevents prioritizing one layer over the rest
     # (otherwise it would cover up the rest disproportionately)
+    #XXX does this depend on something else or is it a pure constant?
     CYCLE_FACTOR = 3
     n_cycle = len(g.fibers) / (n_layers * CYCLE_FACTOR)
 
@@ -409,8 +410,7 @@ register(
   (PF_SLIDER, "f_density", "Fibers Density", 6, (0, 10, 1)),
   (PF_SLIDER, "f_hardness", "Fibers Hardness", 8, (0, 10, 1)),
   (PF_SLIDER, "f_overlap", "Smooth Overlap", 0, (0, 1, 1)),
-  # the last one could be a PF_BOOL,
-  # except i don't care much for the bulky UI button
+  # i don't care much for the bulky PF_BOOL button
  ],
  [],
  peignage)
