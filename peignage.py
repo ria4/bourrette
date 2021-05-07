@@ -19,6 +19,7 @@ W_C = -6.96725624648
 MAX_L_VARIATION = .25
 FIBER_INLINE_GAP = 1.5
 FRAME_PADDING = 1.5
+LEFTOVERS_THRESHOLD = 200
 
 
 class Point:
@@ -272,6 +273,41 @@ def get_coverage(drawable, area_covered_max):
     return pixels * 1.0 / area_covered_max
 
 
+def apply_mask_and_merge(img, layer_base, layer_mask, layer_collage, soft_overlap):
+
+    # Create channel based on brightness levels
+    # White noise means full effect, black noise means no effect
+    pdb.plug_in_colortoalpha(img, layer_mask, "black")
+    pdb.gimp_image_select_item(img, CHANNEL_OP_REPLACE, layer_mask)
+    channel_mask = pdb.gimp_selection_save(img)
+
+    # Create buffer layer
+    # It needs to be visible to be merged down, because reasons
+    layer_buffer = layer_base.copy()
+    layer_buffer.name = "Fibers Buffer"
+    pdb.gimp_item_set_visible(layer_buffer, True)
+    img.add_layer(layer_buffer, 1)
+
+    # Add mask channel to buffer layer
+    pdb.gimp_image_set_active_channel(img, channel_mask)
+    mask_buffer = pdb.gimp_layer_create_mask(layer_buffer, ADD_MASK_CHANNEL)
+    pdb.gimp_layer_add_mask(layer_buffer, mask_buffer)
+
+    # Blend intersecting areas with softlight
+    if soft_overlap:
+        layer_buffer_overlap = layer_buffer.copy()
+        layer_buffer_overlap.mode = LAYER_MODE_SOFTLIGHT
+        img.add_layer(layer_buffer_overlap, 0)
+        pdb.gimp_image_merge_down(img, layer_buffer_overlap, CLIP_TO_IMAGE)
+        layer_collage = img.layers[0]
+
+    # Merge collage layer into buffer layer
+    pdb.gimp_image_merge_down(img, layer_collage, CLIP_TO_IMAGE)
+    img.layers[0].name = "Fibers Collage"
+    pdb.gimp_displays_flush()
+    img.remove_channel(channel_mask)
+
+
 def make_fiber_collage(img, fparams):
 
     # Insulate base layers
@@ -312,61 +348,60 @@ def make_fiber_collage(img, fparams):
     # Fill grid with proper fibers
     g.setup_fibers()
 
-    # CYCLE_FACTOR prevents prioritizing one layer over the rest
-    # (otherwise it would cover up the rest disproportionately)
-    #XXX does this depend on something else or is it a pure constant?
-    CYCLE_FACTOR = 3
-    n_cycle = len(g.fibers) / (n_layers * CYCLE_FACTOR)
+    # Compute number of fibers per buffer
+    n_buffer = len(g.fibers) / n_layers**2
+    buffers_end = n_buffer * n_layers**2
+    n_leftovers = len(g.fibers) - buffers_end
 
-    for i in range(CYCLE_FACTOR):
+    # First loop level to prevent layer prioritization
+    for i in range(n_layers):
 
-        # Cheap shuffling to prevent layer prioritization
-        random.shuffle(base_layers)
+        # Cycle base layers
+        base_layers = base_layers[1:] + base_layers[:1]
 
+        # Second loop level to prevent layer prioritization
         for j in range(n_layers):
+
+            # Register current base layer
+            layer_base = base_layers[j]
+            layer_collage = img.layers[0]
 
             # Reset mask layer to full black
             pdb.gimp_selection_all(img)
             pdb.gimp_drawable_fill(layer_mask, FILL_BACKGROUND)
 
             # Draw fibers on layer mask
-            for k in range(n_cycle):
-                fiber = g.fibers[(i*n_layers + j)*n_cycle + k]
+            for k in range(n_buffer):
+                fiber = g.fibers[(i*n_layers + j)*n_buffer + k]
                 coords = [fiber.m.x, fiber.m.y, fiber.n.x, fiber.n.y]
                 pdb.gimp_paintbrush_default(layer_mask, 4, coords)
 
-            # Create channel based on brightness levels
-            # White noise means full effect, black noise means no effect
-            pdb.plug_in_colortoalpha(img, layer_mask, "black")
-            pdb.gimp_image_select_item(img, CHANNEL_OP_REPLACE, layer_mask)
-            channel_mask = pdb.gimp_selection_save(img)
+            # Apply layer mask and merge to collage layer
+            apply_mask_and_merge(img, layer_base, layer_mask,
+                                 layer_collage, fparams["overlap"])
 
-            # Create buffer layer
-            # It needs to be visible to be merged down, because reasons
-            layer_buffer = base_layers[j].copy()
-            layer_buffer.name = "Fibers Buffer"
-            pdb.gimp_item_set_visible(layer_buffer, True)
-            img.add_layer(layer_buffer, 1)
+    # Add leftover fibers when it makes a difference
+    if (fparams["messiness"] == 0) or (len(g.fibers) < LEFTOVERS_THRESHOLD):
 
-            # Add mask channel to buffer layer
-            pdb.gimp_image_set_active_channel(img, channel_mask)
-            mask_buffer = pdb.gimp_layer_create_mask(layer_buffer, ADD_MASK_CHANNEL)
-            pdb.gimp_layer_add_mask(layer_buffer, mask_buffer)
+        # Loop to prevent prioritization
+        for i in range(n_leftovers):
 
-            # Blend intersecting areas with softlight
-            if fparams["overlap"]:
-                layer_buffer_overlap = layer_buffer.copy()
-                layer_buffer_overlap.mode = LAYER_MODE_SOFTLIGHT
-                img.add_layer(layer_buffer_overlap, 0)
-                pdb.gimp_image_merge_down(img, layer_buffer_overlap, CLIP_TO_IMAGE)
-                layer_collage = img.layers[0]
-
-            # Merge collage layer into buffer layer
-            pdb.gimp_image_merge_down(img, layer_collage, CLIP_TO_IMAGE)
+            # Register current base layer
+            layer_base = base_layers[i % n_layers]
             layer_collage = img.layers[0]
-            layer_collage.name = "Fibers Collage"
-            pdb.gimp_displays_flush()
-            img.remove_channel(channel_mask)
+
+            # Reset mask layer to full black
+            pdb.gimp_selection_all(img)
+            pdb.gimp_drawable_fill(layer_mask, FILL_BACKGROUND)
+
+            # Draw fiber on layer mask
+            fiber = g.fibers[buffers_end + i]
+            coords = [fiber.m.x, fiber.m.y, fiber.n.x, fiber.n.y]
+            pdb.gimp_paintbrush_default(layer_mask, 4, coords)
+
+            # Apply layer mask and merge to collage layer
+            apply_mask_and_merge(img, layer_base, layer_mask,
+                                 layer_collage, fparams["overlap"])
 
     # Clean up
     img.remove_layer(layer_mask)
@@ -434,7 +469,7 @@ register(
   (PF_SLIDER, "f_messiness", "Fibers Messiness", 0, (0, 10, 1)),
   (PF_SLIDER, "f_density", "Fibers Density", 6, (0, 10, 1)),
   (PF_SLIDER, "f_hardness", "Fibers Hardness", 8, (0, 10, 1)),
-  (PF_SLIDER, "f_overlap", "Smooth Overlap", 0, (0, 1, 1)),
+  (PF_SLIDER, "f_overlap", "Soft Overlap", 0, (0, 1, 1)),
   # i don't care much for the bulky PF_BOOL button
  ],
  [],
