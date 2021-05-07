@@ -22,11 +22,15 @@ FRAME_PADDING = 1.5
 
 
 class Point:
+    """
+    Simple Point class with basic transformations.
+    """
     def __init__(self, x, y):
         self.x = x
         self.y = y
 
     def rotate(self, cos_t, sin_t):
+        # The y axis inversion is accounted for
         x = self.x
         y = self.y
         self.x = + x*cos_t + y*sin_t
@@ -37,6 +41,7 @@ class Point:
         self.y += ty
 
     def is_inside(self, p, wp, hp):
+        # Inside the rectangle (p,p)-(wp,p)-(wp,hp)-(p,hp)
         return (p <= self.x <= wp) and (p <= self.y <= hp)
 
     def copy(self):
@@ -44,18 +49,24 @@ class Point:
 
 
 class Fiber:
+    """
+    A Fiber is made of two correlated Points.
+    The class builds each instance from one single Point,
+    which gets copied then translated with constrained randomness.
+    """
     def __init__(self, point, l, messiness):
         self.l_base = l
         self.m = point
         if messiness == 0:
+            # Put N exactly l pixels away from M, on the right
             self.n = self.m.copy()
             self.n.translate(l, 0)
         else:
-            # Displace first point
+            # Move M around initial position
             dl = random.triangular(0, min(messiness, 5)/10.0, 0)
             dt = random.uniform(-math.pi, math.pi)
             self.m.translate(l*dl*math.cos(dt), l*dl*math.sin(dt))
-            # Compute second point
+            # Put N approx. l pixels away, approx. on the right
             dl = random.triangular(-MAX_L_VARIATION, MAX_L_VARIATION)
             dt = random.triangular(-math.pi/2.0, math.pi/2.0)
             dt *= messiness**1.6 / 10**1.6
@@ -71,18 +82,21 @@ class Fiber:
         self.n.translate(tx, ty)
 
     def trim(self, w_img, h_img, p):
+        # If necessary & if possible, trim the fiber to fit inside the frame
+        # Return True iff the resulting fiber is deemed to be long enough
         wp = w_img - p
         hp = h_img - p
-        # both points inside frame
+        # Both points inside frame
         if self.m.is_inside(p, wp, hp) and self.n.is_inside(p, wp, hp):
+            # no need to check the length inherited from __init__
             return True
-        # both points outside frame & in same external sector
+        # Both points outside frame & in same external sector
         if ((self.m.x < p and self.n.x < p) or
             (self.m.y < p and self.n.y < p) or
             (self.m.x > wp and self.n.x > wp) or
             (self.m.y > hp and self.n.y > hp)):
             return False
-        # case x = constant (...approximately)
+        # Case x = constant (or close enough)
         if abs(self.n.x - self.m.x) < 1:
             c = self.m.x
             if self.n.y > self.m.y:
@@ -96,7 +110,7 @@ class Fiber:
                 if self.n.y < p:
                     self.n.y = p
             return self.is_long_enough()
-        # case y = constant (...approximately)
+        # Case y = constant (or close enough)
         if abs(self.n.y - self.m.y) < 1:
             c = self.m.y
             if self.n.x > self.m.x:
@@ -110,7 +124,7 @@ class Fiber:
                 if self.n.x < p:
                     self.n.x = p
             return self.is_long_enough()
-        # case y = ax + b
+        # Case y = ax + b, with a =/= 0
         a = (self.n.y - self.m.y) / (self.n.x - self.m.x)
         b = self.m.y - a * self.m.x
         y1 = a*p+b; y2 = a*wp+b; x1 = (p-b)/a; x2 = (hp-b)/a;
@@ -123,7 +137,7 @@ class Fiber:
             intersections.append((x1, p))
         if p <= x2 <= wp:
             intersections.append((x2, hp))
-        # there should be exactly 0 or 2 intersections
+        # There should be exactly 0 or 2 intersections
         if not intersections:
             return False
         elif len(intersections) == 2:
@@ -146,19 +160,24 @@ class Fiber:
             return self.is_long_enough()
 
     def contains(self, point):
-        # test if a point on the fiber line is actually on the fiber segment
+        # Check whether the given Point is on the Fiber segment
+        # NB: This point already OUGHT TO* be on the Fiber extended line
+        # *key word as defined in RFC 6919
         kp = (self.n.y-self.m.y)*(point.y-self.m.y) + \
                 (self.n.x-self.m.x)*(point.x-self.m.x)
         kf = self.get_length_2()
         return 0 <= kp <= kf
 
     def is_long_enough(self):
+        # Identify fibers shortened beyond 'tasteful' use
+        #TODO This is waste. Should we build something else with it?
         return self.get_length() > (1 - MAX_L_VARIATION) * self.l_base
 
     def get_length_2(self):
         return (self.n.y-self.m.y)**2 + (self.n.x-self.m.x)**2
 
     def get_length(self):
+        # Standard euclidian norm
         return math.sqrt(self.get_length_2())
 
 
@@ -194,11 +213,22 @@ class Grid:
         else:
             self.tx += self.w_in*self.sin_t*self.sin_t
             self.ty += self.w_in*self.sin_t*self.cos_t
-        # Points & Fibers
+        # Points & fibers
         self.points = []
         self.fibers = []
 
+    def setup_fibers(self):
+        # Call this routine to fill the grid with fresh fibers
+        self.create_points()
+        self.create_fibers()
+        self.rotate_fibers()
+        self.translate_fibers()
+        self.trim_fibers()
+        self.shuffle_fibers()
+
     def create_points(self):
+        # Initial points are spaced evenly on every line,
+        # and every line is spaced evenly from its neighbors
         self.points = []
         points_y0 = -self.d * random.random()
         random.shuffle(self.points_x0)
@@ -229,20 +259,14 @@ class Grid:
             if fiber.trim(self.w_img, self.h_img, self.pad) ]
 
     def shuffle_fibers(self):
+        # Mitigate patterns inherited from create_points
         random.shuffle(self.fibers)
-
-    def setup_fibers(self):
-        self.create_points()
-        self.create_fibers()
-        self.rotate_fibers()
-        self.translate_fibers()
-        self.trim_fibers()
-        self.shuffle_fibers()
 
     #XXX def decimer
 
 
 def get_coverage(drawable, area_covered_max):
+    # Return the ratio of (alpha-weighted) pixels over the padded frame
     mean, std_dev, median, pixels, count, percentile = \
             pdb.gimp_drawable_histogram(drawable, HISTOGRAM_VALUE, 0, 1)
     return pixels * 1.0 / area_covered_max
@@ -296,6 +320,7 @@ def make_fiber_collage(img, fparams):
 
     for i in range(CYCLE_FACTOR):
 
+        # Cheap shuffling to prevent layer prioritization
         random.shuffle(base_layers)
 
         for j in range(n_layers):
