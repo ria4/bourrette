@@ -15,11 +15,16 @@ W_A = 3.27285167629e-05
 W_B = 0.0594682389829
 W_C = -6.96725624648
 
+# Mapping for density conversion
+density_map = [.1, .3, .5, .6, .7, .8, .9, .95, .99, .999]
+
 # Constants for fiber drawing
 MAX_L_VARIATION = .25
 FIBER_INLINE_GAP = 1.5
-FRAME_PADDING = 1.5
+FRAME_PADDING = .5
 LEFTOVERS_THRESHOLD = 200
+COVERAGE_FAILSAFE = 150
+FIBER_STROKING = False
 
 
 class Point:
@@ -190,14 +195,24 @@ class Grid:
         self.l = fparams["length"]
         self.d = fparams["width"]
         self.params = fparams
-        # Internal frame
-        self.pad = fparams["width"] / 2.0 * FRAME_PADDING
+        # Internal frame for the fiber points
+        self.pad = fparams["width"] / 2.0 * (1 + FRAME_PADDING)
         self.w_in = self.w_img - 2*self.pad
         self.h_in = self.h_img - 2*self.pad
         # Precomputed trigonometrics
         self.cos_t = math.cos(math.radians(fparams["orientation"]))
         self.sin_t = math.sin(math.radians(fparams["orientation"]))
-        # Dimensions
+        # Note that once drawn, fibers actually go width/2 further
+        overframe = fparams["width"] / 2.0 * fparams["hardness"] / 10.0
+        self.max_area = (self.w_in + overframe) * (self.h_in + overframe)
+        # Also, there may be two corner areas unreachable to trimmed fibers
+        min_l = (1 - MAX_L_VARIATION) * self.l
+        min_l_area = min_l * fparams["width"] * fparams["hardness"] / 10.0
+        corners_area = self.cos_t * self.sin_t * min_l**2
+        corners_area *= (10 - fparams["messiness"]) / 10.0
+        corners_area = max(0, corners_area - min_l_area)
+        self.max_area -= corners_area
+        # Points field dimensions
         self.w = self.w_in*self.cos_t + self.h_in*abs(self.sin_t) + self.l
         self.h = self.h_in*self.cos_t + self.w_in*abs(self.sin_t)
         # Cells
@@ -266,11 +281,12 @@ class Grid:
     #XXX def decimer
 
 
-def get_coverage(drawable, area_covered_max):
+def get_coverage(img, drawable, max_area):
     # Return the ratio of (alpha-weighted) pixels over the padded frame
+    pdb.gimp_selection_all(img)
     mean, std_dev, median, pixels, count, percentile = \
             pdb.gimp_drawable_histogram(drawable, HISTOGRAM_VALUE, 0, 1)
-    return pixels * 1.0 / area_covered_max
+    return pixels * 1.0 / max_area
 
 
 def apply_mask_and_merge(img, layer_base, layer_mask, layer_collage, soft_overlap):
@@ -304,6 +320,14 @@ def apply_mask_and_merge(img, layer_base, layer_mask, layer_collage, soft_overla
     # Merge collage layer into buffer layer
     pdb.gimp_image_merge_down(img, layer_collage, CLIP_TO_IMAGE)
     img.layers[0].name = "Fibers Collage"
+
+    # Stroke lines around fibers (for demo purposes only)
+    if FIBER_STROKING:
+        gimp.set_foreground("black")
+        pdb.gimp_drawable_edit_stroke_selection(img.layers[0])
+        gimp.set_foreground("white")
+
+    # Refresh display to show progress
     pdb.gimp_displays_flush()
     img.remove_channel(channel_mask)
 
@@ -325,6 +349,11 @@ def make_fiber_collage(img, fparams):
     pdb.gimp_context_set_brush_size(fparams["width"])
     pdb.gimp_context_set_brush_hardness(fparams["hardness"] / 10.0)
 
+    # Set stroke line parameters
+    if FIBER_STROKING:
+        pdb.gimp_context_set_line_width(1)
+        pdb.gimp_context_set_stroke_method(STROKE_LINE)
+
     # Instantiate black mask layer
     layer_mask = gimp.Layer(img, "Fibers Mask", img.width, img.height,
                             RGBA_IMAGE, 100, LAYER_MODE_NORMAL)
@@ -340,68 +369,82 @@ def make_fiber_collage(img, fparams):
 
     # Initialize grid
     g = Grid(img, fparams)
-    area_covered_max = g.w_in * g.h_in
 
     # Loop until non-transparent area is large enough
-    # XXX use density parameter here
+    coverage_loop_cnt = 0
+    coverage = 0
+    coverage_target = density_map[int(round(fparams["density"])) - 1]
 
-    # Fill grid with proper fibers
-    g.setup_fibers()
+    while coverage < coverage_target and coverage_loop_cnt < COVERAGE_FAILSAFE:
 
-    # Compute number of fibers per buffer
-    n_buffer = len(g.fibers) / n_layers**2
-    buffers_end = n_buffer * n_layers**2
-    n_leftovers = len(g.fibers) - buffers_end
+        # Fill grid with proper fibers
+        g.setup_fibers()
 
-    # First loop level to prevent layer prioritization
-    for i in range(n_layers):
+        # Compute number of fibers per buffer
+        n_buffer = len(g.fibers) / n_layers**2
+        buffers_end = n_buffer * n_layers**2
+        n_leftovers = len(g.fibers) - buffers_end
 
-        # Cycle base layers
-        base_layers = base_layers[1:] + base_layers[:1]
+        # First loop level to prevent layer prioritization
+        for i in range(n_layers):
 
-        # Second loop level to prevent layer prioritization
-        for j in range(n_layers):
+            # Cycle base layers
+            base_layers = base_layers[1:] + base_layers[:1]
 
-            # Register current base layer
-            layer_base = base_layers[j]
-            layer_collage = img.layers[0]
+            # Second loop level to prevent layer prioritization
+            for j in range(n_layers):
 
-            # Reset mask layer to full black
-            pdb.gimp_selection_all(img)
-            pdb.gimp_drawable_fill(layer_mask, FILL_BACKGROUND)
+                # Register current base layer
+                layer_base = base_layers[j]
+                layer_collage = img.layers[0]
 
-            # Draw fibers on layer mask
-            for k in range(n_buffer):
-                fiber = g.fibers[(i*n_layers + j)*n_buffer + k]
+                # Reset mask layer to full black
+                pdb.gimp_selection_all(img)
+                pdb.gimp_drawable_fill(layer_mask, FILL_BACKGROUND)
+
+                # Draw fibers on layer mask
+                for k in range(n_buffer):
+                    fiber = g.fibers[(i*n_layers + j)*n_buffer + k]
+                    coords = [fiber.m.x, fiber.m.y, fiber.n.x, fiber.n.y]
+                    pdb.gimp_paintbrush_default(layer_mask, 4, coords)
+
+                # Apply layer mask and merge to collage layer
+                apply_mask_and_merge(img, layer_base, layer_mask,
+                                     layer_collage, fparams["overlap"])
+
+                #XXX the density loop broke this
+                # Display oh-so-fancy progress
+                #progress = (i*n_layers + j + 1.0) / n_layers**2
+                #progress_pcnt = int(progress * 100)
+                #pdb.gimp_progress_update(progress)
+                #pdb.gimp_progress_set_text("%d%%" % progress_pcnt)
+
+        # Add leftover fibers when it makes a difference
+        if (fparams["messiness"] == 0) or (len(g.fibers) < LEFTOVERS_THRESHOLD):
+
+            # Loop to prevent prioritization
+            for i in range(n_leftovers):
+
+                # Register current base layer
+                layer_base = base_layers[i % n_layers]
+                layer_collage = img.layers[0]
+
+                # Reset mask layer to full black
+                pdb.gimp_selection_all(img)
+                pdb.gimp_drawable_fill(layer_mask, FILL_BACKGROUND)
+
+                # Draw fiber on layer mask
+                fiber = g.fibers[buffers_end + i]
                 coords = [fiber.m.x, fiber.m.y, fiber.n.x, fiber.n.y]
                 pdb.gimp_paintbrush_default(layer_mask, 4, coords)
 
-            # Apply layer mask and merge to collage layer
-            apply_mask_and_merge(img, layer_base, layer_mask,
-                                 layer_collage, fparams["overlap"])
+                # Apply layer mask and merge to collage layer
+                apply_mask_and_merge(img, layer_base, layer_mask,
+                                     layer_collage, fparams["overlap"])
 
-    # Add leftover fibers when it makes a difference
-    if (fparams["messiness"] == 0) or (len(g.fibers) < LEFTOVERS_THRESHOLD):
-
-        # Loop to prevent prioritization
-        for i in range(n_leftovers):
-
-            # Register current base layer
-            layer_base = base_layers[i % n_layers]
-            layer_collage = img.layers[0]
-
-            # Reset mask layer to full black
-            pdb.gimp_selection_all(img)
-            pdb.gimp_drawable_fill(layer_mask, FILL_BACKGROUND)
-
-            # Draw fiber on layer mask
-            fiber = g.fibers[buffers_end + i]
-            coords = [fiber.m.x, fiber.m.y, fiber.n.x, fiber.n.y]
-            pdb.gimp_paintbrush_default(layer_mask, 4, coords)
-
-            # Apply layer mask and merge to collage layer
-            apply_mask_and_merge(img, layer_base, layer_mask,
-                                 layer_collage, fparams["overlap"])
+        # Update coverage to continue or break loop
+        coverage = get_coverage(img, img.layers[0], g.max_area)
+        coverage_loop_cnt += 1
 
     # Clean up
     img.remove_layer(layer_mask)
