@@ -16,7 +16,7 @@ W_B = 0.0594682389829
 W_C = -6.96725624648
 
 # Mapping for density conversion
-density_map = [.1, .3, .5, .6, .7, .8, .9, .95, .99, .999]
+density_map = [.1, .25, .4, .5, .6, .7, .8, .9, .95, .99, .999]
 
 # Constants for fiber drawing
 MAX_L_VARIATION = .25
@@ -188,6 +188,10 @@ class Fiber:
 
 
 class Grid:
+    """
+    A Grid is made of multiple Fibers spread across the frame.
+    The fibers can be reset with a call to setup_fibers().
+    """
     def __init__(self, img, fparams):
         # Imported constants
         self.w_img = img.width
@@ -278,7 +282,9 @@ class Grid:
         # Mitigate patterns inherited from create_points
         random.shuffle(self.fibers)
 
-    #XXX def decimer
+    def decimate(self, x):
+        # Drop fibers to lower density
+        self.fibers[:] = self.fibers[int((1-x)*len(self.fibers)):]
 
 
 def get_coverage(img, drawable, max_area):
@@ -373,12 +379,24 @@ def make_fiber_collage(img, fparams):
     # Loop until non-transparent area is large enough
     coverage_loop_cnt = 0
     coverage = 0
-    coverage_target = density_map[int(round(fparams["density"])) - 1]
+    coverage_target = density_map[int(round(fparams["density"]))]
+
+    # Very very rough prediction of first-round grid density
+    decimate_factor = 0
+    if coverage_target < .8:
+        coverage_predict = 1 + math.pi * fparams["width"] / 4 / fparams["length"]
+        coverage_predict *= fparams["hardness"] / 10.0 / FIBER_INLINE_GAP
+        coverage_predict = max(0, coverage_predict - .05)
+        decimate_factor = 3.0/5 * coverage_target / coverage_predict
 
     while coverage < coverage_target and coverage_loop_cnt < COVERAGE_FAILSAFE:
 
         # Fill grid with proper fibers
         g.setup_fibers()
+
+        # Lower density if necessary
+        if decimate_factor:
+            g.decimate(decimate_factor)
 
         # Compute number of fibers per buffer
         n_buffer = len(g.fibers) / n_layers**2
