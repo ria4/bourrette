@@ -90,12 +90,12 @@ register(
  "RGB*",
  [
   (PF_INT32, "noise_seed", "Noise Seed", 0),
-  (PF_SPINNER, "noise_detail", "Noise Detail", 1, (0, 5, 1)),
+  (PF_SLIDER, "noise_detail", "Noise Detail", 1, (0, 5, 1)),
   (PF_SLIDER, "noise_size", "Noise Size", 6, (1, 10, 1)),
   (PF_BOOL, "noise_smoothness", "Noise Smoothness", False),
   (PF_SLIDER, "noise_threshold", "Noise Threshold", 30, (0, 100, 1)),
   (PF_SLIDER, "hue_shift", "Hue Adjustment", 0, (-180, 180, 1)),
-  (PF_SLIDER, "chroma_shift", "Chroma Adjustment", 60, (-180, 180, 1)),
+  (PF_SLIDER, "chroma_shift", "Chroma Adjustment", 60, (-100, 100, 1)),
  ],
  [],
  decreusage)
