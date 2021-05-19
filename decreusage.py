@@ -86,7 +86,7 @@ register(
  "Oriane Tury",
  "GNU GPLv3",
  "2021",
- "<Image>/Filters/Decreusage",
+ "<Image>/Filters/Artistic/Decreusage",
  "RGB*",
  [
   (PF_INT32, "noise_seed", "Noise Seed", 0),
