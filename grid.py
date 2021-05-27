@@ -2,6 +2,8 @@
 import math
 import random
 
+from gimpfu import pdb
+
 
 # Constants for fiber drawing
 MAX_L_VARIATION = .25
@@ -160,6 +162,14 @@ class Fiber:
         # Identify fibers shortened beyond 'tasteful' use
         #TODO This is waste. Should we build something else with it?
         return self.get_length() > (1 - MAX_L_VARIATION) * self.l_base
+
+    def has_transparent_end(self, layer):
+        # Detect degraded fibers from a transparent end
+        nbr_channels, m = pdb.gimp_drawable_get_pixel(layer, self.m.x, self.m.y)
+        nbr_channels, n = pdb.gimp_drawable_get_pixel(layer, self.n.x, self.n.y)
+        if nbr_channels < 4:
+            return False
+        return (m[3] == 0) or (n[3] == 0)
 
     def get_length_2(self):
         return (self.n.y-self.m.y)**2 + (self.n.x-self.m.x)**2

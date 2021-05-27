@@ -20,13 +20,14 @@ W_C = -6.96725624648
 
 # Mapping for density conversion
 # Note that density_map[9] may take a *long* time
-density_map = [.1, .25, .4, .5, .6, .7, .8, .9, .95, .99, .999]
+density_map = [.1, .25, .4, .5, .6, .7, .8, .9, .95, .99, .996]
 
 # Constants for fiber drawing
 LEFTOVERS_THRESHOLD = 100
 COVERAGE_FAILSAFE = 100
 FIBER_STROKING = False
 GOTTA_GO_FAST = True
+TRANSPARENCY_CHECK = False
 
 # If the plug-in does not respond, you might want to use:
 # sudo kill $(ps aux | grep 'peignage.py -gimp' | awk '{print $2}')
@@ -129,7 +130,7 @@ def make_fiber_collage(img, fparams):
 
     # Very very rough prediction of first-round grid density
     decimate_factor = 0
-    if coverage_target < .8:
+    if coverage_target < .7:
         coverage_predict = 1 + math.pi * fparams["width"] / 4 / fparams["length"]
         coverage_predict *= fparams["hardness"] / 10.0 / grid.FIBER_INLINE_GAP
         coverage_predict = max(0, coverage_predict - .05)
@@ -169,6 +170,10 @@ def make_fiber_collage(img, fparams):
                 for j in range(n_buffer):
                     fiber = g.fibers[i*n_buffer + j]
                     coords = [fiber.m.x, fiber.m.y, fiber.n.x, fiber.n.y]
+                    if TRANSPARENCY_CHECK:
+                        # Remove partially transparent fibers (e.g. after reframing)
+                        if fiber.has_transparent_end(layer_base):
+                            continue
                     pdb.gimp_paintbrush_default(layer_mask, 4, coords)
 
                 # Apply layer mask and merge to collage layer
@@ -214,6 +219,9 @@ def make_fiber_collage(img, fparams):
                         for k in range(n_buffer):
                             fiber = g.fibers[(i*n_layers + j)*n_buffer + k]
                             coords = [fiber.m.x, fiber.m.y, fiber.n.x, fiber.n.y]
+                            if TRANSPARENCY_CHECK:
+                                if fiber.has_transparent_end(layer_base):
+                                    continue
                             pdb.gimp_paintbrush_default(layer_mask, 4, coords)
 
                         # Apply layer mask and merge to collage layer
@@ -245,6 +253,9 @@ def make_fiber_collage(img, fparams):
                     # Draw fiber on layer mask
                     fiber = g.fibers[buffers_end + i]
                     coords = [fiber.m.x, fiber.m.y, fiber.n.x, fiber.n.y]
+                    if TRANSPARENCY_CHECK:
+                        if fiber.has_transparent_end(layer_base):
+                            continue
                     pdb.gimp_paintbrush_default(layer_mask, 4, coords)
 
                     # Apply layer mask and merge to collage layer
